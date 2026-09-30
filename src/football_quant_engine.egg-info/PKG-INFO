@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: football-quant-engine
+Version: 0.3.0
+Summary: Probabilistic football analytics engine: goals, corners, cards, Monte Carlo, bootstrap and stress testing.
+Requires-Python: >=3.11
+Requires-Dist: numpy>=1.26
+Requires-Dist: pandas>=2.2
+Requires-Dist: scipy>=1.13
+Requires-Dist: requests>=2.32
