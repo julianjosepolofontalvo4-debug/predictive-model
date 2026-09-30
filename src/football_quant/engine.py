@@ -77,7 +77,11 @@ class FootballQuantEngine:
             raise ValueError("Se necesitan al menos 8 partidos históricos para V1.")
 
     def _team_subset(self, df, team):
-        return df[(df.home_team == team) | (df.away_team == team)].sort_values("date")
+        matches = df[(df.home_team == team) | (df.away_team == team)]
+        sort_columns = ["date"]
+        if "fixture_id" in matches.columns:
+            sort_columns.append("fixture_id")
+        return matches.sort_values(sort_columns, kind="mergesort")
 
     def _team_splits(self, history, match):
         """Return the (home-venue history for home team, away-venue history
@@ -132,6 +136,8 @@ class FootballQuantEngine:
 
         hh_np = {col: hh[col].to_numpy(float) for col in ("home_goals", "home_corners", "home_cards")}
         aa_np = {col: aa[col].to_numpy(float) for col in ("away_goals", "away_corners", "away_cards")}
+        effective_n_h = 1.0 / np.sum(wh ** 2)
+        effective_n_a = 1.0 / np.sum(wa ** 2)
 
         boot = {name: {line: {"over": [], "under": []} for line in lines} for name, lines in LINE_GRID.items()}
         boot_stressed = {name: {line: {"over": [], "under": []} for line in lines} for name, lines in LINE_GRID.items()}
@@ -140,10 +146,10 @@ class FootballQuantEngine:
             idx_h = rng.choice(n_h, size=n_h, replace=True, p=wh)
             idx_a = rng.choice(n_a, size=n_a, replace=True, p=wa)
 
-            wh_b = wh[idx_h]
-            wh_b = wh_b / wh_b.sum()
-            wa_b = wa[idx_a]
-            wa_b = wa_b / wa_b.sum()
+            # Sampling already reflects recency. Equal weights within each
+            # replicate avoid applying temporal weights twice.
+            wh_b = np.full(n_h, 1.0 / n_h)
+            wa_b = np.full(n_a, 1.0 / n_a)
 
             mappings = {
                 "home_goals": (hh_np["home_goals"][idx_h], wh_b),
@@ -154,7 +160,15 @@ class FootballQuantEngine:
                 "away_cards": (aa_np["away_cards"][idx_a], wa_b),
             }
             params_b = {
-                key: fit_count_distribution(values, weights, self.league_prior[key], self.shrink_k)
+                key: fit_count_distribution(
+                    values,
+                    weights,
+                    self.league_prior[key],
+                    self.shrink_k,
+                    effective_n_override=(
+                        effective_n_h if key.startswith("home_") else effective_n_a
+                    ),
+                )
                 for key, (values, weights) in mappings.items()
             }
             sim_params_b = {
@@ -183,6 +197,10 @@ class FootballQuantEngine:
     def fit_predict(self, history, match, n_simulations=100_000, n_bootstrap=500, seed=42, stress_pct=0.10):
         history = history.copy()
         history["date"] = pd.to_datetime(history["date"], utc=True, format="mixed")
+        sort_columns = ["date"]
+        if "fixture_id" in history.columns:
+            sort_columns.append("fixture_id")
+        history = history.sort_values(sort_columns, kind="mergesort").reset_index(drop=True)
         self._validate(history)
 
         params = self._rates(history, match)

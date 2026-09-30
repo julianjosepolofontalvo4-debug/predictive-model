@@ -19,8 +19,10 @@ def main() -> None:
     store = SQLiteStore(args.db)
     loop = FeedbackLoop(store, FootballQuantEngine(prior))
     print("DRIFT:", loop.drift_report())
+    print("PREDICTION ERRORS:", loop.learning_report())
     print("RETRAIN:", loop.retrain_snapshot())
 
 
 if __name__ == "__main__":
     main()
+

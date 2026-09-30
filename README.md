@@ -1,48 +1,3 @@
-# Proyecto: predictive-model (football_quant)
-
-Modelo de predicción estadística de fútbol. Abajo está el árbol de archivos y el contenido completo de cada archivo.
-
-## Estructura
-
-```
-README.md
-backtest/runner.py
-baseline.py
-data/history_template_multi_competition.csv
-data/sample_matches.csv
-data/upcoming_matches.csv
-data/upcoming_multi_competition.csv
-feedback_loop.py
-import_history.py
-predict.py
-pyproject.toml
-record_result.py
-run_example.py
-scheduler.py
-src/football_quant/__init__.py
-src/football_quant/automation/__init__.py
-src/football_quant/automation/api_football.py
-src/football_quant/automation/feedback.py
-src/football_quant/automation/manual.py
-src/football_quant/automation/store.py
-src/football_quant/automation/sync.py
-src/football_quant/automation/team_names.py
-src/football_quant/core.py
-src/football_quant/engine.py
-src/football_quant/markets.py
-src/football_quant/simulation.py
-src/football_quant/uncertainty.py
-sync_data.py
-tests/test_automation.py
-tests/test_engine.py
-tests/test_manual_workflow.py
-```
-
-## Archivos
-
-### `README.md`
-
-```markdown
 # Football Quant Engine v0.4 — Multi-Competition + Error Learning
 
 Motor probabilístico para fútbol diseñado para **LaLiga, Premier League y Champions League** (y extensible a otras competiciones).
@@ -59,6 +14,8 @@ Motor probabilístico para fútbol diseñado para **LaLiga, Premier League y Cha
 - **Bootstrap de datos:** la incertidumbre de mercados se estima re-muestreando históricos y reajustando parámetros.
 - **Snapshots reproducibles:** cada entrenamiento guarda el histórico y una versión hash.
 - **Auditoría:** cada predicción queda almacenada y luego vinculada con el resultado real.
+- **Evaluación automática:** al registrar un resultado, `data/prediction_evaluation.csv` (junto a la base indicada con `--db`) se actualiza con predicción, valor real, error absoluto y error porcentual por métrica.
+- **Recencia:** el historial se procesa por fecha ascendente y los partidos recientes reciben mayor peso tanto en las estimaciones como en el aprendizaje del error.
 
 > No existe un porcentaje de error mínimo garantizable en fútbol. La arquitectura está pensada para **medir, detectar sesgos, recalibrar y mejorar**, no para prometer aciertos. La literatura de modelado deportivo también destaca que calibración y evaluación temporal son tan importantes como la precisión bruta.
 
@@ -96,7 +53,10 @@ python record_result.py 100002
 Al registrar el partido, el sistema:
 1. guarda el resultado,
 2. calcula los errores por métrica,
-3. deja el error disponible para aprendizaje posterior.
+3. actualiza `prediction_evaluation.csv` separado del registro de predicciones,
+4. deja el error disponible para aprendizaje posterior.
+
+El CSV de evaluación contiene una fila por partido y métrica. Si el valor real es cero, el error porcentual individual se deja vacío porque ese porcentaje no está definido; el reporte de `python feedback_loop.py` también muestra WAPE porcentual acumulado por métrica.
 
 ## Ver aprendizaje
 
@@ -113,4 +73,3 @@ python -m pytest -q
 ## Principio de diseño
 
 El modelo no se "autoentrena" con datos futuros. Cada predicción se congela en el momento de generarse; el resultado solo entra en el aprendizaje después de que el partido termina. Esto evita contaminar retrospectivamente las predicciones.
-```

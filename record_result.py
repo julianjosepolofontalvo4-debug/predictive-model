@@ -40,16 +40,21 @@ def main() -> None:
         audit = manager.record_result(args.fixture_id, values)
         feedback = FeedbackLoop(store, FootballQuantEngine(PRIOR))
         recalibration = feedback.recalibrate_priors()
-        snapshot = feedback.retrain_snapshot()
+        snapshot = feedback.retrain_snapshot(league_prior=recalibration)
         print("\n✓ Resultado almacenado")
         print("✓ Predicción auditada")
         print("✓ Estadísticas incorporadas al historial")
         print("\nERRORES (real - esperado)")
         for key, value in audit["error"].items():
             print(f"  {key:18s}: {value:+.3f}")
+        print("\nERROR ABSOLUTO PORCENTUAL (respecto al valor real)")
+        for key, value in audit["absolute_percentage_error"].items():
+            formatted = "n/d (real = 0)" if value is None else f"{value:.1f}%"
+            print(f"  {key:18s}: {formatted}")
+        print(f"\n✓ Comparación guardada en: {audit['evaluation_file']}")
         print("\n✓ Feedback loop ejecutado")
         print(f"✓ Recalibración: {recalibration}")
-        print(f"✓ Snapshot: {snapshot.get("status")}")
+        print(f"✓ Snapshot: {snapshot.get('status')}")
         print("\nEl próximo `python predict.py` ya podrá utilizar este partido como información histórica.")
     finally:
         store.close()

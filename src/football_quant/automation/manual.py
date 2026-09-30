@@ -22,6 +22,7 @@ class ManualMatchManager:
         if missing: raise ValueError(f"Faltan columnas en {path}: {', '.join(missing)}")
         if df["fixture_id"].duplicated().any(): raise ValueError("Hay fixture_id duplicados en el calendario.")
         df["date"]=df["date"].map(lambda x: parse_match_date(x).isoformat())
+        df=df.sort_values(["date","fixture_id"],kind="mergesort").reset_index(drop=True)
         df["home_team_input"]=df["home_team"].astype(str).str.strip()
         df["away_team_input"]=df["away_team"].astype(str).str.strip()
         df["home_team"]=df["home_team"].map(normalize_team_name); df["away_team"]=df["away_team"].map(normalize_team_name)
@@ -32,6 +33,15 @@ class ManualMatchManager:
         upcoming=self.load_upcoming(path); outputs=[]
         for row in upcoming.itertuples(index=False):
             match_date=parse_match_date(row.date); competition=str(row.competition).strip()
+            fixture_id=int(row.fixture_id)
+            stored_prediction=self.store.get_prediction(fixture_id)
+            if stored_prediction is not None and self.store.has_observation(fixture_id):
+                identity=(stored_prediction.get("date"),stored_prediction.get("competition"),stored_prediction.get("home_team"),stored_prediction.get("away_team"))
+                requested=(match_date.isoformat(),competition,normalize_team_name(row.home_team),normalize_team_name(row.away_team))
+                if identity!=requested:
+                    raise ValueError(f"El fixture_id {fixture_id} ya tiene un resultado auditado para otro partido.")
+                outputs.append(stored_prediction)
+                continue
             history=self.store.historical_dataframe(competition)
             if len(history)<8:
                 raise ValueError(f"{competition}: solo hay {len(history)} partidos completos antes de predecir {row.home_team} vs {row.away_team}. Importa más historial de esta competición.")
@@ -49,13 +59,13 @@ class ManualMatchManager:
             latest_date=pd.to_datetime(match_history["date"],utc=True,format="mixed").max()
             days_since=max(0.0,float((match_date-latest_date).total_seconds()/86400.0)); freshness=max(0.0,min(1.0,2.718281828**(-days_since/45.0)))
             prediction["metadata"].update({"model_version":"manual-v0.4-learning","competition":competition,"learning":learning,"learned_bias":bias,"effective_prior":learned_prior,"freshness_score":freshness,"data_quality":float(min(prediction["metadata"].get("data_quality",1.0),freshness))})
-            prediction.update({"home_team":home_team,"away_team":away_team,"fixture_id":int(row.fixture_id),"date":match_date.isoformat(),"competition":competition,"history_matches_used":int(len(match_history)),"latest_history_date":latest_date.isoformat(),"days_since_latest_history":round(days_since,2),"team_form":{home_team:self.store.team_form(home_team,competition=competition),away_team:self.store.team_form(away_team,competition=competition)},"generated_at":datetime.now(timezone.utc).isoformat()})
+            prediction.update({"home_team":home_team,"away_team":away_team,"fixture_id":fixture_id,"date":match_date.isoformat(),"competition":competition,"history_matches_used":int(len(match_history)),"latest_history_date":latest_date.isoformat(),"days_since_latest_history":round(days_since,2),"team_form":{home_team:self.store.team_form(home_team,competition=competition,before_date=match_date),away_team:self.store.team_form(away_team,competition=competition,before_date=match_date)},"generated_at":datetime.now(timezone.utc).isoformat()})
             # Backward-compatible display keys for aliases such as Villarreal/Real Betis.
             if str(getattr(row, "home_team_input", home_team)) != home_team:
                 prediction["team_form"][str(row.home_team_input)] = prediction["team_form"][home_team]
             if str(getattr(row, "away_team_input", away_team)) != away_team:
                 prediction["team_form"][str(row.away_team_input)] = prediction["team_form"][away_team]
-            self.store.upsert_manual_fixture(int(row.fixture_id),match_date.isoformat(),competition,home_team,away_team); self.store.save_prediction(int(row.fixture_id),prediction); outputs.append(prediction)
+            self.store.upsert_manual_fixture(fixture_id,match_date.isoformat(),competition,home_team,away_team); self.store.save_prediction(fixture_id,prediction); outputs.append(prediction)
         return outputs
 
     def record_result(self, fixture_id:int, observed:dict[str,Any])->dict[str,Any]:

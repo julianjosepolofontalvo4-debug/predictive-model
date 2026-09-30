@@ -97,4 +97,3 @@ def test_error_learning_is_conservative(tmp_path):
     bias, meta = store.learning_bias("Test League", before_date="2028-01-01T00:00:00Z")
     assert meta["status"] == "ok"
     assert abs(bias["home_goals"]) <= 0.75
-

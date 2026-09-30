@@ -33,4 +33,3 @@ def test_store_builds_history(tmp_path):
     assert df.iloc[0].away_corners == 4
     assert df.iloc[0].home_cards == 2
     assert df.iloc[0].away_cards == 3
-    assert df.iloc[0].away_cards == 3

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from ..engine import FootballQuantEngine
+from ..core import temporal_weights
 from .store import SQLiteStore
 
 @dataclass
@@ -26,9 +27,11 @@ class FeedbackLoop:
     def recalibrate_priors(self,*,blend:float=0.20,competition:str|None=None)->dict[str,float]:
         history=self.store.historical_dataframe(competition)
         if len(history)<8: return dict(self.engine.league_prior)
-        recent=history.tail(min(80,len(history))); updated=dict(self.engine.league_prior); blend=max(0.0,min(1.0,float(blend)))
+        recent=history.tail(min(80,len(history))); weights=temporal_weights(len(recent)); updated=dict(self.engine.league_prior); blend=max(0.0,min(1.0,float(blend)))
         for key in updated:
-            if key in recent: updated[key]=(1-blend)*float(updated[key])+blend*float(recent[key].mean())
+            if key in recent:
+                recent_mean=float((recent[key].to_numpy(float)*weights).sum())
+                updated[key]=(1-blend)*float(updated[key])+blend*recent_mean
         self.engine.league_prior=updated; return updated
 
     def retrain_snapshot(self,*,league_prior:dict[str,float]|None=None,output_dir:str="data/model_snapshots",competition:str|None=None)->dict[str,Any]:
