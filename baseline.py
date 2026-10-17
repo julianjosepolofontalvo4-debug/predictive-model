@@ -76,17 +76,34 @@ def rmse(actual, predicted):
     )
 
 
+def history_before_match(history: pd.DataFrame, match_date) -> pd.DataFrame:
+
+    dates = pd.to_datetime(
+        history["date"],
+        utc=True,
+        format="mixed",
+    )
+    cutoff = pd.to_datetime(
+        match_date,
+        utc=True,
+        format="mixed",
+    )
+    return history.loc[dates < cutoff].copy()
+
+
 def run_baseline(csv_path: str, min_train_matches: int = 8):
 
     df = pd.read_csv(csv_path)
 
     df["date"] = pd.to_datetime(
-        df["date"]
+        df["date"],
+        utc=True,
+        format="mixed",
     )
 
     df = (
         df
-        .sort_values("date")
+        .sort_values("date", kind="mergesort")
         .reset_index(drop=True)
     )
 
@@ -94,8 +111,8 @@ def run_baseline(csv_path: str, min_train_matches: int = 8):
 
     for i in range(len(df)):
 
-        history = df.iloc[:i].copy()
         match = df.iloc[i]
+        history = history_before_match(df, match["date"])
 
         if len(history) < min_train_matches:
             continue

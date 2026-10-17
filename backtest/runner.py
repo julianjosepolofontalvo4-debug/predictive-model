@@ -59,7 +59,9 @@ class BacktestRunner:
         # Fecha
         df["date"] = pd.to_datetime(
             df["date"],
-            errors="raise"
+            errors="raise",
+            utc=True,
+            format="mixed",
         )
 
         # Estadísticas numéricas
@@ -91,7 +93,7 @@ class BacktestRunner:
         # Orden estrictamente cronológico
         df = (
             df
-            .sort_values("date")
+            .sort_values("date", kind="mergesort")
             .reset_index(drop=True)
         )
 
@@ -165,6 +167,16 @@ class BacktestRunner:
         ).sum()
 
         return (home_count + away_count) > 0
+
+    @staticmethod
+    def history_before_match(
+        history: pd.DataFrame,
+        match_date,
+    ) -> pd.DataFrame:
+        """Keep only matches with a date strictly before the target match."""
+        dates = pd.to_datetime(history["date"], utc=True, format="mixed")
+        cutoff = pd.to_datetime(match_date, utc=True, format="mixed")
+        return history.loc[dates < cutoff].copy()
 
     # ============================================================
     # 4. EXTRAER EXPECTATIVAS
@@ -381,6 +393,10 @@ class BacktestRunner:
         df: pd.DataFrame,
     ) -> pd.DataFrame:
 
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"], utc=True, format="mixed")
+        df = df.sort_values("date", kind="mergesort").reset_index(drop=True)
+
         results = []
 
         total_matches = len(df)
@@ -408,13 +424,8 @@ class BacktestRunner:
 
         for i in range(total_matches):
 
-            history = (
-                df
-                .iloc[:i]
-                .copy()
-            )
-
             match = df.iloc[i]
+            history = self.history_before_match(df, match["date"])
 
             # ----------------------------------------------------
             # Historial mínimo

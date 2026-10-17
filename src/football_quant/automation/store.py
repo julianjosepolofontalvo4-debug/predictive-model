@@ -230,7 +230,7 @@ class SQLiteStore:
             where += " AND f.competition=?"; params.append(competition)
         # Match dates are normalized to UTC ISO strings on insert; add a stable
         # fixture-id tie-break so all downstream use follows date order.
-        rows = self.conn.execute(f"SELECT f.fixture_id,f.date,f.home_team,f.away_team,f.home_goals,f.away_goals,f.competition,s.payload_json FROM fixtures f LEFT JOIN match_stats s ON s.fixture_id=f.fixture_id {where} ORDER BY f.date, f.fixture_id", params).fetchall()
+        rows = self.conn.execute(f"SELECT f.fixture_id,f.season,f.date,f.home_team,f.away_team,f.home_goals,f.away_goals,f.competition,s.payload_json FROM fixtures f LEFT JOIN match_stats s ON s.fixture_id=f.fixture_id {where} ORDER BY f.date, f.fixture_id", params).fetchall()
         out=[]
         for r in rows:
             home, away = normalize_team_name(r["home_team"]), normalize_team_name(r["away_team"])
@@ -244,16 +244,36 @@ class SQLiteStore:
                 elif side==away:
                     values["away_corners"]=parsed.get("Corner Kicks"); values["away_cards"]=(parsed.get("Yellow Cards") or 0)+(parsed.get("Red Cards") or 0)
             if all(values[k] is not None for k in values):
-                out.append({"fixture_id":r["fixture_id"],"date":parse_match_date(r["date"]).isoformat(),"home_team":home,"away_team":away,"home_goals":r["home_goals"],"away_goals":r["away_goals"],"competition":r["competition"],**values})
+                out.append({"fixture_id":r["fixture_id"],"season":r["season"],"date":parse_match_date(r["date"]).isoformat(),"home_team":home,"away_team":away,"home_goals":r["home_goals"],"away_goals":r["away_goals"],"competition":r["competition"],**values})
         return pd.DataFrame(out)
+
+    @staticmethod
+    def _season_year(value: Any) -> int:
+        """Return the starting year of a football season (August to July)."""
+        date = parse_match_date(value)
+        return date.year if date.month >= 8 else date.year - 1
 
     def team_form(self, team: str, n: int = 5, competition: str | None = None, before_date: Any | None = None) -> dict[str, Any]:
         team=normalize_team_name(team); df=self.historical_dataframe(competition)
-        if before_date is not None and not df.empty:
-            dates=pd.to_datetime(df["date"],utc=True,format="mixed")
-            df=df[dates<parse_match_date(before_date)]
         if df.empty: return {"team":team,"matches":0}
-        subset=df[(df.home_team==team)|(df.away_team==team)].tail(n).copy()
+        limit=max(0,min(int(n),5))
+        if limit == 0: return {"team":team,"matches":0}
+        cutoff=parse_match_date(before_date) if before_date is not None else pd.Timestamp.now(tz="UTC")
+        dates=pd.to_datetime(df["date"],utc=True,format="mixed")
+        df=df.loc[dates<cutoff].copy()
+        if df.empty: return {"team":team,"matches":0}
+        df["season_year"]=pd.to_numeric(df.get("season"),errors="coerce") if "season" in df else float("nan")
+        missing_season=df["season_year"].isna()
+        df.loc[missing_season,"season_year"]=pd.to_datetime(df.loc[missing_season,"date"],utc=True,format="mixed").map(self._season_year)
+        df["season_year"]=df["season_year"].astype(int)
+        subset=df[(df.home_team==team)|(df.away_team==team)].copy()
+        if subset.empty: return {"team":team,"matches":0}
+        current=subset[subset.season_year==self._season_year(cutoff)].tail(limit)
+        if len(current)<limit:
+            previous=subset[subset.season_year==self._season_year(cutoff)-1].tail(limit-len(current))
+            subset=pd.concat([previous,current]).sort_values(["date","fixture_id"],kind="mergesort")
+        else:
+            subset=current
         if subset.empty: return {"team":team,"matches":0}
         gf=subset.apply(lambda r:r.home_goals if r.home_team==team else r.away_goals,axis=1); ga=subset.apply(lambda r:r.away_goals if r.home_team==team else r.home_goals,axis=1)
         points=[]

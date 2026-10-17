@@ -97,3 +97,98 @@ def test_error_learning_is_conservative(tmp_path):
     bias, meta = store.learning_bias("Test League", before_date="2028-01-01T00:00:00Z")
     assert meta["status"] == "ok"
     assert abs(bias["home_goals"]) <= 0.75
+
+
+def record_barcelona_result(store, fixture_id, date, home_goals, away_goals):
+    store.upsert_manual_fixture(
+        fixture_id, date, "LaLiga", "FC Barcelona", "Test Opponent"
+    )
+    store.complete_manual_fixture(fixture_id, {
+        "home_goals": home_goals, "away_goals": away_goals,
+        "home_corners": 5, "away_corners": 4,
+        "home_cards": 1, "away_cards": 2,
+    })
+
+
+def test_barcelona_form_fills_current_season_from_previous_and_excludes_future(tmp_path):
+    store = SQLiteStore(tmp_path / "barcelona.db")
+    previous_season = [
+        ("2026-05-01T20:00:00Z", 0, 1),
+        ("2026-05-09T20:00:00Z", 2, 0),
+        ("2026-05-17T20:00:00Z", 1, 1),
+        ("2026-05-25T20:00:00Z", 0, 1),
+    ]
+    current_season = [
+        ("2026-08-10T20:00:00Z", 3, 0),
+        ("2026-08-20T20:00:00Z", 2, 2),
+        ("2026-08-28T20:00:00Z", 1, 0),
+    ]
+    for fixture_id, (date, home_goals, away_goals) in enumerate(
+        previous_season + current_season, start=920000
+    ):
+        record_barcelona_result(store, fixture_id, date, home_goals, away_goals)
+    record_barcelona_result(store, 920007, "2026-09-01T21:00:00Z", 0, 1)
+    record_barcelona_result(store, 920008, "2026-09-03T20:00:00Z", 0, 1)
+
+    form = store.team_form(
+        "Barcelona", before_date="2026-09-01T20:00:00Z"
+    )
+
+    assert form["matches"] == 5
+    assert form["last_results"] == ["D", "L", "W", "D", "W"]
+    assert form["points"] == 8
+
+
+def test_barcelona_form_uses_only_five_current_season_matches(tmp_path):
+    store = SQLiteStore(tmp_path / "barcelona_five.db")
+    for fixture_id, date in enumerate(
+        ["2026-05-01T20:00:00Z", "2026-05-09T20:00:00Z",
+         "2026-05-17T20:00:00Z", "2026-05-25T20:00:00Z"],
+        start=930000,
+    ):
+        record_barcelona_result(store, fixture_id, date, 0, 1)
+    for fixture_id, date in enumerate(
+        ["2026-08-10T20:00:00Z", "2026-08-15T20:00:00Z",
+         "2026-08-20T20:00:00Z", "2026-08-25T20:00:00Z",
+         "2026-08-30T20:00:00Z"],
+        start=930004,
+    ):
+        record_barcelona_result(store, fixture_id, date, 2, 0)
+
+    form = store.team_form(
+        "FC Barcelona", n=10, before_date="2026-09-01T20:00:00Z"
+    )
+
+    assert form["matches"] == 5
+    assert form["points"] == 15
+    assert form["last_results"] == ["W", "W", "W", "W", "W"]
+
+
+def test_prediction_history_excludes_same_day_after_cutoff_and_future(tmp_path):
+    store = make_store(tmp_path)
+    original_history_count = len(store.historical_dataframe("Test League"))
+    for fixture_id, date in [
+        (940001, "2026-12-01T21:00:00Z"),
+        (940002, "2026-12-02T20:00:00Z"),
+    ]:
+        store.upsert_manual_fixture(
+            fixture_id, date, "Test League", "Sevilla FC", "Rayo Vallecano"
+        )
+        store.complete_manual_fixture(fixture_id, {
+            "home_goals": 3, "away_goals": 0,
+            "home_corners": 7, "away_corners": 2,
+            "home_cards": 1, "away_cards": 3,
+        })
+
+    upcoming = tmp_path / "cutoff.csv"
+    upcoming.write_text(
+        "fixture_id,date,competition,home_team,away_team\n"
+        "940003,2026-12-01T20:00:00Z,Test League,Sevilla FC,Rayo Vallecano\n",
+        encoding="utf-8",
+    )
+    prediction = ManualMatchManager(store, make_engine()).predict_upcoming(
+        upcoming, n_simulations=100, n_bootstrap=5
+    )[0]
+
+    assert prediction["history_matches_used"] == original_history_count
+    assert prediction["latest_history_date"] == "2026-09-13T00:00:00+00:00"
